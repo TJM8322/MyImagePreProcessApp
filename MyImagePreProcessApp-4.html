@@ -1,0 +1,627 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Visual Inspection Pre-processing Tool</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
+    <script async src="https://docs.opencv.org/4.5.5/opencv.js" type="text/javascript" onload="onOpenCvReady();"></script>
+    <style>
+        .canvas-container {
+            height: 60vh;
+            background: #1f2937;
+            position: relative;
+            overflow: hidden;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            touch-action: none;
+        }
+        canvas {
+            box-shadow: 0 0 20px rgba(0,0,0,0.5);
+        }
+        .control-label {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            font-size: 0.75rem;
+            font-weight: bold;
+            color: #4b5563;
+            margin-bottom: 2px;
+        }
+        input[type="range"] {
+            width: 100%;
+            height: 4px;
+        }
+        .coord-input {
+            width: 100%;
+            border: 1px solid #d1d5db;
+            border-radius: 4px;
+            padding: 2px 4px;
+            font-size: 11px;
+            font-family: monospace;
+        }
+    </style>
+</head>
+<body class="bg-gray-50 min-h-screen font-sans text-gray-900">
+
+    <div class="max-w-[1400px] mx-auto p-4 md:p-6">
+        <header class="mb-4 border-b pb-2 flex justify-between items-center">
+            <div>
+                <h1 class="text-2xl font-bold text-blue-800">外観検査用 画像前処理GUI <span id="cvStatus" class="text-xs font-normal bg-gray-200 px-2 py-1 rounded ml-2">OpenCV Loading...</span></h1>
+            </div>
+        </header>
+
+        <div class="grid grid-cols-1 lg:grid-cols-4 gap-6">
+            
+            <!-- Sidebar -->
+            <div class="lg:col-span-1 space-y-4 max-h-[90vh] overflow-y-auto pr-2">
+                <section class="bg-white p-4 rounded-xl shadow-sm border text-gray-700">
+                    <h2 class="text-sm font-semibold mb-3 flex items-center">
+                        <span class="bg-blue-100 text-blue-800 w-6 h-6 rounded-full inline-flex items-center justify-center mr-2 text-xs">1</span>
+                        読み込み設定
+                    </h2>
+                    <div class="space-y-3">
+                        <div class="flex gap-2 p-1 bg-gray-100 rounded-lg">
+                            <button id="btnModeFile" class="flex-1 py-1 text-[11px] font-bold rounded shadow-sm bg-white text-blue-600">ファイル</button>
+                            <button id="btnModeFolder" class="flex-1 py-1 text-[11px] font-bold rounded text-gray-500">フォルダ</button>
+                        </div>
+                        
+                        <div id="folderOptions" class="hidden flex items-center gap-2 mb-2">
+                            <input type="checkbox" id="recursiveCheck" class="w-3 h-3 text-blue-600" checked>
+                            <label for="recursiveCheck" class="text-[10px] font-bold text-gray-600">サブフォルダも含める</label>
+                        </div>
+
+                        <input type="file" id="fileInput" multiple accept=".jpg,.jpeg,.png,.bmp" class="block w-full text-xs text-gray-500 file:mr-2 file:py-1 file:px-3 file:rounded-full file:border-0 file:bg-blue-50 file:text-blue-700">
+                    </div>
+                </section>
+
+                <section class="bg-white p-4 rounded-xl shadow-sm border text-gray-700">
+                    <h2 class="text-sm font-semibold mb-3 flex items-center text-blue-700">
+                        <span class="bg-blue-100 text-blue-800 w-6 h-6 rounded-full inline-flex items-center justify-center mr-2 text-xs">2</span>
+                        フィルタ調整
+                    </h2>
+                    <div class="space-y-4">
+                        <div>
+                            <div class="control-label"><span>ガウス</span><span id="valGauss">0</span></div>
+                            <input type="range" id="paramGauss" min="0" max="15" step="2" value="0">
+                        </div>
+                        <div>
+                            <div class="control-label"><span>メディアン</span><span id="valMedian">0</span></div>
+                            <input type="range" id="paramMedian" min="0" max="15" step="2" value="0">
+                        </div>
+                        <div>
+                            <div class="control-label"><span>鮮鋭化</span><span id="valSharpen">0.0</span></div>
+                            <input type="range" id="paramSharpen" min="0" max="5" step="0.1" value="0">
+                        </div>
+                        <div class="border-t pt-2">
+                            <select id="histMode" class="w-full border rounded p-1 text-xs">
+                                <option value="none">ヒストグラム等化なし</option>
+                                <option value="global">全体等化</option>
+                                <option value="clahe">CLAHE</option>
+                            </select>
+                        </div>
+                    </div>
+                </section>
+
+                <section class="bg-white p-4 rounded-xl shadow-sm border text-gray-700">
+                    <h2 class="text-sm font-semibold mb-3 flex items-center">
+                        <span class="bg-blue-100 text-blue-800 w-6 h-6 rounded-full inline-flex items-center justify-center mr-2 text-xs">3</span>
+                        CROP・座標指定
+                    </h2>
+                    <div class="space-y-3">
+                        <div class="flex items-center gap-2">
+                            <input type="checkbox" id="enableCrop" class="w-4 h-4 text-blue-600">
+                            <label for="enableCrop" class="text-xs font-bold text-blue-800">CROPを書き出しに反映</label>
+                        </div>
+                        
+                        <div class="bg-gray-50 p-2 rounded border space-y-2">
+                            <div class="grid grid-cols-2 gap-2">
+                                <div>
+                                    <label class="text-[9px] font-bold text-gray-500 uppercase">Left (X1)</label>
+                                    <input type="number" id="cropL" class="coord-input" placeholder="0">
+                                </div>
+                                <div>
+                                    <label class="text-[9px] font-bold text-gray-500 uppercase">Top (Y1)</label>
+                                    <input type="number" id="cropT" class="coord-input" placeholder="0">
+                                </div>
+                                <div>
+                                    <label class="text-[9px] font-bold text-gray-500 uppercase">Right (X2)</label>
+                                    <input type="number" id="cropR" class="coord-input" placeholder="0">
+                                </div>
+                                <div>
+                                    <label class="text-[9px] font-bold text-gray-500 uppercase">Bottom (Y2)</label>
+                                    <input type="number" id="cropB" class="coord-input" placeholder="0">
+                                </div>
+                            </div>
+                            <button id="applyManualCrop" class="w-full bg-blue-100 hover:bg-blue-200 text-blue-800 text-[10px] font-bold py-1 rounded">
+                                座標を適用
+                            </button>
+                        </div>
+
+                        <select id="resizeMode" class="w-full border rounded p-1 text-xs mt-2">
+                            <option value="none">リサイズなし</option>
+                            <option value="stretch">引き伸ばし</option>
+                            <option value="letterbox" selected>Letterbox (パディング)</option>
+                        </select>
+                        <div class="grid grid-cols-2 gap-2">
+                            <div>
+                                <span class="text-[10px] text-gray-500 font-bold uppercase">Target Size</span>
+                                <input type="number" id="targetS" value="640" class="w-full border rounded p-1 text-xs font-mono">
+                            </div>
+                            <div class="flex items-end pb-1">
+                                <input type="color" id="paddingColor" value="#000000" class="h-6 w-full cursor-pointer bg-transparent border rounded">
+                            </div>
+                        </div>
+                    </div>
+                </section>
+
+                <section class="bg-white p-4 rounded-xl shadow-sm border border-blue-100 bg-blue-50/30">
+                    <h2 class="text-sm font-semibold mb-3 flex items-center text-gray-700">
+                        <span class="bg-blue-600 text-white w-6 h-6 rounded-full inline-flex items-center justify-center mr-2 text-xs font-bold">4</span>
+                        一括保存
+                    </h2>
+                    <div class="space-y-3">
+                        <button id="batchProcessBtn" class="w-full bg-blue-600 hover:bg-blue-700 text-white font-bold py-2 rounded shadow text-sm">
+                            ZIP保存
+                        </button>
+                        <p class="text-[10px] text-gray-500 text-center">※Pascal VOC (XML)形式で座標出力</p>
+                    </div>
+                </section>
+            </div>
+
+            <!-- Main Panel -->
+            <div class="lg:col-span-3 flex flex-col gap-4">
+                <div class="bg-white p-3 rounded-xl shadow-sm border flex flex-wrap justify-between items-center gap-4">
+                    <div class="flex items-center gap-2">
+                        <button id="prevBtn" class="px-2 py-1 bg-gray-100 rounded text-xs border">◀</button>
+                        <span id="imageCounter" class="text-xs font-mono font-bold w-16 text-center">0 / 0</span>
+                        <button id="nextBtn" class="px-2 py-1 bg-gray-100 rounded text-xs border">▶</button>
+                        <span id="currentName" class="text-[10px] text-gray-400 truncate max-w-[200px] ml-2">---</span>
+                    </div>
+
+                    <div class="flex gap-1 bg-gray-100 p-1 rounded-lg">
+                        <button id="btnZoomFit" class="px-2 py-1 hover:bg-white rounded text-xs font-bold">全体表示</button>
+                        <span id="zoomLevel" class="px-2 py-1 text-[10px] font-mono self-center w-12 text-center">100%</span>
+                    </div>
+                    
+                    <div class="flex items-center gap-2 border-l pl-4">
+                        <input type="checkbox" id="togglePan" class="w-4 h-4">
+                        <label for="togglePan" class="text-xs cursor-pointer select-none">移動モード</label>
+                    </div>
+                </div>
+
+                <div id="viewport" class="canvas-container rounded-xl border-2 border-gray-300 relative">
+                    <div id="canvasWrapper" style="transform-origin: 0 0; position: absolute; left: 0; top: 0;">
+                        <canvas id="editorCanvas"></canvas>
+                    </div>
+                    <div id="noImageMsg" class="absolute inset-0 flex items-center justify-center text-gray-400 pointer-events-none bg-gray-800 z-10">
+                        画像またはフォルダを選択してください
+                    </div>
+                </div>
+
+                <div class="flex justify-between items-center text-[11px] bg-white p-3 rounded border">
+                    <div class="text-gray-500">
+                        <span class="font-bold text-blue-600">操作:</span> ドラッグでCROP、矩形内ドラッグで移動、境界線でリサイズ。
+                    </div>
+                    <button id="resetCropBtn" class="text-red-600 font-bold hover:underline">CROP解除</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div id="loadingOverlay" class="fixed inset-0 bg-black/60 hidden items-center justify-center z-50">
+        <div class="bg-white p-6 rounded-2xl text-center max-w-sm w-full shadow-2xl">
+            <div class="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600 mx-auto mb-4"></div>
+            <p id="loadingMsg" class="font-bold text-sm text-gray-700">保存ファイルを生成中...</p>
+            <p id="progressLabel" class="text-xs text-gray-400 mt-2">0 / 0</p>
+        </div>
+    </div>
+
+    <script>
+        let images = [];
+        let currentIndex = -1;
+        let scale = 1.0;
+        let translateX = 0;
+        let translateY = 0;
+        let isPanning = false;
+        let lastMouseX = 0;
+        let lastMouseY = 0;
+        
+        let cropRect = null; // {x, y, w, h} normalized (0.0 to 1.0)
+        let editMode = null; 
+        let dragOffset = { x: 0, y: 0 };
+        let dragStartPos = { x: 0, y: 0 };
+
+        let cvReady = false;
+        const viewport = document.getElementById('viewport');
+        const canvasWrapper = document.getElementById('canvasWrapper');
+        const canvas = document.getElementById('editorCanvas');
+        const ctx = canvas.getContext('2d');
+        const fileInput = document.getElementById('fileInput');
+        const recursiveCheck = document.getElementById('recursiveCheck');
+
+        const inputL = document.getElementById('cropL');
+        const inputT = document.getElementById('cropT');
+        const inputR = document.getElementById('cropR');
+        const inputB = document.getElementById('cropB');
+
+        function onOpenCvReady() {
+            if (typeof cv !== 'undefined' && cv.Mat) {
+                cvReady = true;
+                const label = document.getElementById('cvStatus');
+                label.textContent = "OpenCV Ready";
+                label.className = "text-xs font-normal bg-green-100 text-green-800 px-2 py-1 rounded ml-2";
+                if (currentIndex >= 0) render();
+            } else { setTimeout(onOpenCvReady, 100); }
+        }
+
+        function setInputMode(mode) {
+            fileInput.value = "";
+            if (mode === 'folder') {
+                fileInput.webkitdirectory = true;
+                fileInput.setAttribute('webkitdirectory', '');
+                document.getElementById('btnModeFolder').classList.add('bg-white', 'text-blue-600', 'shadow-sm');
+                document.getElementById('btnModeFolder').classList.remove('text-gray-500');
+                document.getElementById('btnModeFile').classList.remove('bg-white', 'text-blue-600', 'shadow-sm');
+                document.getElementById('btnModeFile').classList.add('text-gray-500');
+                document.getElementById('folderOptions').classList.remove('hidden');
+            } else {
+                fileInput.webkitdirectory = false;
+                fileInput.removeAttribute('webkitdirectory');
+                document.getElementById('btnModeFile').classList.add('bg-white', 'text-blue-600', 'shadow-sm');
+                document.getElementById('btnModeFile').classList.remove('text-gray-500');
+                document.getElementById('btnModeFolder').classList.remove('bg-white', 'text-blue-600', 'shadow-sm');
+                document.getElementById('btnModeFolder').classList.add('text-gray-500');
+                document.getElementById('folderOptions').classList.add('hidden');
+            }
+        }
+
+        document.getElementById('btnModeFile').onclick = () => setInputMode('file');
+        document.getElementById('btnModeFolder').onclick = () => setInputMode('folder');
+
+        function updateTransform() {
+            canvasWrapper.style.transform = `translate(${translateX}px, ${translateY}px) scale(${scale})`;
+            document.getElementById('zoomLevel').textContent = `${Math.round(scale * 100)}%`;
+        }
+
+        function zoomFit() {
+            if (currentIndex === -1 || !canvas.width) return;
+            const vRect = viewport.getBoundingClientRect();
+            const scaleW = (vRect.width - 40) / canvas.width;
+            const scaleH = (vRect.height - 40) / canvas.height;
+            scale = Math.min(scaleW, scaleH, 1.0);
+            translateX = (vRect.width - canvas.width * scale) / 2;
+            translateY = (vRect.height - canvas.height * scale) / 2;
+            updateTransform();
+        }
+
+        async function loadImage(index) {
+            if (index < 0 || index >= images.length) return;
+            const item = images[index];
+            if (item.imgElement) { render(); return; }
+            return new Promise((resolve) => {
+                const img = new Image();
+                img.onload = () => { item.imgElement = img; render(); resolve(); };
+                img.src = URL.createObjectURL(item.file);
+            });
+        }
+
+        function syncCropInputs() {
+            if (cropRect && currentIndex !== -1) {
+                const img = images[currentIndex].imgElement;
+                if (!img) return;
+                inputL.value = Math.round(cropRect.x * img.width);
+                inputT.value = Math.round(cropRect.y * img.height);
+                inputR.value = Math.round((cropRect.x + cropRect.w) * img.width);
+                inputB.value = Math.round((cropRect.y + cropRect.h) * img.height);
+            }
+        }
+
+        document.getElementById('applyManualCrop').onclick = () => {
+            if (currentIndex === -1) return;
+            const img = images[currentIndex].imgElement;
+            const l = parseFloat(inputL.value) || 0;
+            const t = parseFloat(inputT.value) || 0;
+            const r = parseFloat(inputR.value) || img.width;
+            const b = parseFloat(inputB.value) || img.height;
+            cropRect = { x: l / img.width, y: t / img.height, w: (r-l) / img.width, h: (b-t) / img.height };
+            document.getElementById('enableCrop').checked = true;
+            render();
+        };
+
+        function applyFilters(src) {
+            const gK = parseInt(document.getElementById('paramGauss').value);
+            if (gK > 0) cv.GaussianBlur(src, src, new cv.Size(gK + 1, gK + 1), 0, 0, cv.BORDER_DEFAULT);
+            const mK = parseInt(document.getElementById('paramMedian').value);
+            if (mK > 0) cv.medianBlur(src, src, mK + 1);
+            const sVal = parseFloat(document.getElementById('paramSharpen').value);
+            if (sVal > 0) {
+                let blurred = new cv.Mat();
+                cv.GaussianBlur(src, blurred, new cv.Size(0, 0), 3);
+                cv.addWeighted(src, 1 + sVal, blurred, -sVal, 0, src);
+                blurred.delete();
+            }
+            const hMode = document.getElementById('histMode').value;
+            if (hMode !== 'none') {
+                let ycrcb = new cv.Mat();
+                cv.cvtColor(src, ycrcb, cv.COLOR_RGBA2RGB);
+                cv.cvtColor(ycrcb, ycrcb, cv.COLOR_RGB2YCrCb);
+                let channels = new cv.MatVector();
+                cv.split(ycrcb, channels);
+                let y = channels.get(0);
+                if (hMode === 'global') cv.equalizeHist(y, y);
+                else if (hMode === 'clahe') {
+                    let clahe = new cv.ClAHE(2.0, new cv.Size(8, 8));
+                    clahe.apply(y, y); clahe.delete();
+                }
+                channels.set(0, y); cv.merge(channels, ycrcb);
+                cv.cvtColor(ycrcb, src, cv.COLOR_YCrCb2RGB);
+                cv.cvtColor(src, src, cv.COLOR_RGB2RGBA);
+                ycrcb.delete(); channels.delete(); y.delete();
+            }
+        }
+
+        function render() {
+            if (currentIndex < 0 || !images[currentIndex].imgElement) return;
+            const img = images[currentIndex].imgElement;
+
+            const procCanvas = document.createElement('canvas');
+            procCanvas.width = img.width; procCanvas.height = img.height;
+            if (cvReady) {
+                let src = cv.imread(img); applyFilters(src); cv.imshow(procCanvas, src); src.delete();
+            } else { procCanvas.getContext('2d').drawImage(img, 0, 0); }
+
+            canvas.width = img.width; canvas.height = img.height;
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+            ctx.drawImage(procCanvas, 0, 0);
+
+            if (cropRect) {
+                const rx = cropRect.x * canvas.width, ry = cropRect.y * canvas.height;
+                const rw = cropRect.w * canvas.width, rh = cropRect.h * canvas.height;
+                ctx.fillStyle = 'rgba(0, 0, 0, 0.5)';
+                ctx.fillRect(0, 0, canvas.width, ry);
+                ctx.fillRect(0, ry + rh, canvas.width, canvas.height - (ry + rh));
+                ctx.fillRect(0, ry, rx, rh);
+                ctx.fillRect(rx + rw, ry, canvas.width - (rx + rw), rh);
+                ctx.strokeStyle = '#3b82f6'; ctx.lineWidth = 3 / scale;
+                ctx.strokeRect(rx, ry, rw, rh);
+                ctx.fillStyle = '#ffffff'; const s = 8 / scale;
+                ctx.fillRect(rx-s/2, ry-s/2, s, s); ctx.fillRect(rx+rw-s/2, ry-s/2, s, s);
+                ctx.fillRect(rx-s/2, ry+rh-s/2, s, s); ctx.fillRect(rx+rw-s/2, ry+rh-s/2, s, s);
+            }
+            syncCropInputs();
+            document.getElementById('imageCounter').textContent = `${currentIndex + 1} / ${images.length}`;
+            document.getElementById('currentName').textContent = images[currentIndex].name;
+        }
+
+        fileInput.onchange = async (e) => {
+            const files = Array.from(e.target.files).filter(f => /\.(jpe?g|png|bmp)$/i.test(f.name));
+            if (files.length === 0) return;
+            images = files.map(f => ({ file: f, name: f.name, imgElement: null }));
+            currentIndex = 0;
+            document.getElementById('noImageMsg').style.display = 'none';
+            await loadImage(0);
+            zoomFit();
+        };
+
+        function getMousePos(e) {
+            const rect = canvas.getBoundingClientRect();
+            return { x: (e.clientX - rect.left) / scale, y: (e.clientY - rect.top) / scale };
+        }
+
+        viewport.onmousedown = (e) => {
+            if (currentIndex === -1) return;
+            lastMouseX = e.clientX; lastMouseY = e.clientY;
+            if (document.getElementById('togglePan').checked) { isPanning = true; return; }
+            
+            const pos = getMousePos(e);
+            const nx = pos.x / canvas.width, ny = pos.y / canvas.height;
+            const threshold = 15 / (canvas.width * scale); 
+
+            if (cropRect) {
+                const onL = Math.abs(nx - cropRect.x) < threshold;
+                const onR = Math.abs(nx - (cropRect.x + cropRect.w)) < threshold;
+                const onT = Math.abs(ny - cropRect.y) < threshold;
+                const onB = Math.abs(ny - (cropRect.y + cropRect.h)) < threshold;
+
+                if (onL && onT) editMode = 'resize-TL';
+                else if (onR && onT) editMode = 'resize-TR';
+                else if (onL && onB) editMode = 'resize-BL';
+                else if (onR && onB) editMode = 'resize-BR';
+                else if (onL) editMode = 'resize-L';
+                else if (onR) editMode = 'resize-R';
+                else if (onT) editMode = 'resize-T';
+                else if (onB) editMode = 'resize-B';
+                else if (nx > cropRect.x && nx < cropRect.x + cropRect.w && ny > cropRect.y && ny < cropRect.y + cropRect.h) {
+                    editMode = 'move';
+                    dragOffset = { x: nx - cropRect.x, y: ny - cropRect.y };
+                } else {
+                    editMode = 'create'; dragStartPos = pos;
+                    cropRect = { x: nx, y: ny, w: 0, h: 0 };
+                }
+            } else {
+                editMode = 'create'; dragStartPos = pos;
+                cropRect = { x: nx, y: ny, w: 0, h: 0 };
+            }
+        };
+
+        window.onmousemove = (e) => {
+            if (isPanning) {
+                translateX += (e.clientX - lastMouseX); translateY += (e.clientY - lastMouseY);
+                lastMouseX = e.clientX; lastMouseY = e.clientY;
+                updateTransform(); return;
+            }
+            if (!editMode) return;
+            const pos = getMousePos(e);
+            const nx = Math.max(0, Math.min(1, pos.x / canvas.width));
+            const ny = Math.max(0, Math.min(1, pos.y / canvas.height));
+
+            if (editMode === 'create') {
+                cropRect.w = (pos.x - dragStartPos.x) / canvas.width;
+                cropRect.h = (pos.y - dragStartPos.y) / canvas.height;
+            } else if (editMode === 'move') {
+                cropRect.x = Math.max(0, Math.min(1 - cropRect.w, nx - dragOffset.x));
+                cropRect.y = Math.max(0, Math.min(1 - cropRect.h, ny - dragOffset.y));
+            } else if (editMode.startsWith('resize')) {
+                const right = cropRect.x + cropRect.w;
+                const bottom = cropRect.y + cropRect.h;
+                if (editMode.includes('L')) { cropRect.x = nx; cropRect.w = right - nx; }
+                if (editMode.includes('R')) { cropRect.w = nx - cropRect.x; }
+                if (editMode.includes('T')) { cropRect.y = ny; cropRect.h = bottom - ny; }
+                if (editMode.includes('B')) { cropRect.h = ny - cropRect.y; }
+            }
+            render();
+        };
+
+        window.onmouseup = () => {
+            if (editMode === 'create') {
+                if (cropRect.w < 0) { cropRect.x += cropRect.w; cropRect.w = Math.abs(cropRect.w); }
+                if (cropRect.h < 0) { cropRect.y += cropRect.h; cropRect.h = Math.abs(cropRect.h); }
+                if (Math.abs(cropRect.w) < 0.005) cropRect = null;
+            }
+            document.getElementById('enableCrop').checked = !!cropRect;
+            editMode = null; isPanning = false; render();
+        };
+
+        document.getElementById('prevBtn').onclick = async () => { if(currentIndex > 0) { currentIndex--; await loadImage(currentIndex); render(); } };
+        document.getElementById('nextBtn').onclick = async () => { if(currentIndex < images.length-1) { currentIndex++; await loadImage(currentIndex); render(); } };
+        document.getElementById('resetCropBtn').onclick = () => { cropRect = null; document.getElementById('enableCrop').checked = false; render(); };
+        document.getElementById('btnZoomFit').onclick = zoomFit;
+
+        ['paramGauss', 'paramMedian', 'paramSharpen', 'histMode'].forEach(id => {
+            document.getElementById(id).oninput = render;
+        });
+
+        // Helper to generate Pascal VOC XML
+        function generatePascalVocXml(fileName, width, height, x1, y1, x2, y2) {
+            return `<?xml version="1.0"?>
+<annotation>
+    <folder>processed</folder>
+    <filename>${fileName}</filename>
+    <path>${fileName}</path>
+    <source>
+        <database>Unknown</database>
+    </source>
+    <size>
+        <width>${width}</width>
+        <height>${height}</height>
+        <depth>3</depth>
+    </size>
+    <segmented>0</segmented>
+    <object>
+        <name>target</name>
+        <pose>Unspecified</pose>
+        <truncated>0</truncated>
+        <difficult>0</difficult>
+        <bndbox>
+            <xmin>${Math.round(x1)}</xmin>
+            <ymin>${Math.round(y1)}</ymin>
+            <xmax>${Math.round(x2)}</xmax>
+            <ymax>${Math.round(y2)}</ymax>
+        </bndbox>
+    </object>
+</annotation>`;
+        }
+
+        document.getElementById('batchProcessBtn').onclick = async () => {
+            if (images.length === 0) return;
+            const overlay = document.getElementById('loadingOverlay');
+            const progressLabel = document.getElementById('progressLabel');
+            overlay.classList.remove('hidden');
+            
+            const zip = new JSZip();
+            const config = {
+                doCrop: document.getElementById('enableCrop').checked && cropRect,
+                targetSize: parseInt(document.getElementById('targetS').value) || 640,
+                resizeMode: document.getElementById('resizeMode').value,
+                bgColor: document.getElementById('paddingColor').value
+            };
+
+            // 使用画像を確実に同期的に処理
+            for (let i = 0; i < images.length; i++) {
+                progressLabel.textContent = `${i + 1} / ${images.length}`;
+                
+                // 画像要素がなければロード
+                if (!images[i].imgElement) {
+                    await loadImage(i);
+                }
+                const img = images[i].imgElement;
+                
+                // 1. OpenCV フィルタ適用
+                const fCanvas = document.createElement('canvas'); 
+                fCanvas.width = img.width; fCanvas.height = img.height;
+                if (cvReady) {
+                    let src = cv.imread(img);
+                    applyFilters(src);
+                    cv.imshow(fCanvas, src);
+                    src.delete();
+                } else {
+                    fCanvas.getContext('2d').drawImage(img, 0, 0);
+                }
+
+                // 2. 切り出し領域の決定
+                let sx = 0, sy = 0, sw = fCanvas.width, sh = fCanvas.height;
+                if (config.doCrop) {
+                    sx = Math.max(0, cropRect.x * fCanvas.width);
+                    sy = Math.max(0, cropRect.y * fCanvas.height);
+                    sw = Math.min(fCanvas.width - sx, cropRect.w * fCanvas.width);
+                    sh = Math.min(fCanvas.height - sy, cropRect.h * fCanvas.height);
+                }
+
+                // 3. リサイズ・出力描画
+                const outCanvas = document.createElement('canvas');
+                const oCtx = outCanvas.getContext('2d');
+                
+                let outX1, outY1, outX2, outY2;
+
+                if (config.resizeMode !== 'none') {
+                    outCanvas.width = outCanvas.height = config.targetSize;
+                    if (config.resizeMode === 'letterbox') {
+                        oCtx.fillStyle = config.bgColor;
+                        oCtx.fillRect(0, 0, config.targetSize, config.targetSize);
+                        let ratio = Math.min(config.targetSize / sw, config.targetSize / sh);
+                        let dw = sw * ratio, dh = sh * ratio;
+                        let dx = (config.targetSize - dw) / 2;
+                        let dy = (config.targetSize - dh) / 2;
+                        oCtx.drawImage(fCanvas, sx, sy, sw, sh, dx, dy, dw, dh);
+                        // Letterbox内での座標 (基本的には外枠いっぱいに設定することが多いが、ここでは描画矩形をそのまま追跡)
+                        outX1 = dx; outY1 = dy; outX2 = dx + dw; outY2 = dy + dh;
+                    } else {
+                        // stretch
+                        oCtx.drawImage(fCanvas, sx, sy, sw, sh, 0, 0, config.targetSize, config.targetSize);
+                        outX1 = 0; outY1 = 0; outX2 = config.targetSize; outY2 = config.targetSize;
+                    }
+                } else {
+                    outCanvas.width = sw; outCanvas.height = sh;
+                    oCtx.drawImage(fCanvas, sx, sy, sw, sh, 0, 0, sw, sh);
+                    outX1 = 0; outY1 = 0; outX2 = sw; outY2 = sh;
+                }
+
+                // 4. ファイル名の設定とZIP追加
+                const baseName = images[i].name.split('.')[0];
+                const outImageName = `proc_${baseName}.jpg`;
+                const outXmlName = `proc_${baseName}.xml`;
+
+                // 画像をBlob化
+                const blob = await new Promise(resolve => outCanvas.toBlob(resolve, 'image/jpeg', 0.92));
+                zip.file(outImageName, blob);
+
+                // Pascal VOC XMLを生成して追加
+                const xmlContent = generatePascalVocXml(outImageName, outCanvas.width, outCanvas.height, outX1, outY1, outX2, outY2);
+                zip.file(outXmlName, xmlContent);
+            }
+
+            // ZIP生成とダウンロード
+            const content = await zip.generateAsync({type: "blob"});
+            const a = document.createElement('a');
+            a.href = URL.createObjectURL(content);
+            a.download = `processed_inspection_images_${new Date().getTime()}.zip`;
+            a.click();
+            
+            overlay.classList.add('hidden');
+        };
+    </script>
+</body>
+</html>
