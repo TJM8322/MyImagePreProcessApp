@@ -399,7 +399,12 @@
         fileInput.onchange = async (e) => {
             const files = Array.from(e.target.files).filter(f => /\.(jpe?g|png|bmp)$/i.test(f.name));
             if (files.length === 0) return;
-            images = files.map(f => ({ file: f, name: f.name, imgElement: null }));
+            images = files.map(f => ({
+                file: f,
+                name: f.name,
+                relativePath: f.webkitRelativePath || f.name,
+                imgElement: null
+            }));
             currentIndex = 0;
             document.getElementById('noImageMsg').style.display = 'none';
             await loadImage(0);
@@ -600,9 +605,16 @@
                 }
 
                 // 4. ファイル名の設定とZIP追加
-                const baseName = images[i].name.split('.')[0];
-                const outImageName = `proc_${baseName}.jpg`;
-                const outXmlName = `proc_${baseName}.xml`;
+                const sourcePath = images[i].relativePath || images[i].name;
+                const normalizedPath = sourcePath.replace(/\\/g, '/');
+                const extensionIndex = normalizedPath.lastIndexOf('.');
+                const pathWithoutExt = extensionIndex > 0 ? normalizedPath.slice(0, extensionIndex) : normalizedPath;
+                const safeBaseName = pathWithoutExt
+                    .replace(/^\/+/, '')
+                    .replace(/[^a-zA-Z0-9_/-]/g, '_')
+                    .replace(/\/+/g, '/');
+                const outImageName = `proc_${safeBaseName}.jpg`;
+                const outXmlName = `proc_${safeBaseName}.xml`;
 
                 // 画像をBlob化
                 const blob = await new Promise(resolve => outCanvas.toBlob(resolve, 'image/jpeg', 0.92));
